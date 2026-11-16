@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar de prospección · Data Goal</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Prototipo interno DG-2026-22. Los colores de marca se cambian aquí. */
+:root{
+  --fondo:#0b1220; --panel:#111a2e; --panel2:#18233b; --linea:#25324d;
+  --texto:#e6ecf7; --suave:#93a1bd; --tenue:#64728f;
+  --radar:#35e0a1; --aviso:#fbbf24; --alerta:#f87171; --ok:#34d399;
+  --radio:10px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--fondo);color:var(--texto);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
+button,input{font:inherit;color:inherit}
+a{color:var(--radar)}
+
+header{display:flex;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--linea);background:var(--panel);flex-wrap:wrap}
+.marca{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:.2px;white-space:nowrap}
+.marca svg{flex:none}
+.marca small{display:block;font-weight:400;color:var(--suave);font-size:12px;letter-spacing:0}
+.busca{position:relative;flex:1 1 260px;max-width:440px}
+.busca input{width:100%;padding:10px 12px 10px 36px;border-radius:var(--radio);border:1px solid var(--linea);background:var(--fondo);outline:none}
+.busca input:focus{border-color:var(--radar);box-shadow:0 0 0 3px rgba(53,224,161,.15)}
+.busca svg{position:absolute;left:11px;top:11px;opacity:.6}
+.sug{position:absolute;z-index:1200;left:0;right:0;top:calc(100% + 4px);background:var(--panel2);border:1px solid var(--linea);border-radius:var(--radio);max-height:320px;overflow:auto;display:none;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.sug.abierta{display:block}
+.sug div{padding:8px 12px;display:flex;justify-content:space-between;gap:12px;cursor:pointer}
+.sug div.activa,.sug div:hover{background:rgba(53,224,161,.12)}
+.sug span{color:var(--suave);font-size:13px;white-space:nowrap}
+.sug .vacia{color:var(--suave);cursor:default}
+.perfil{margin-left:auto;background:var(--fondo);border:1px solid var(--linea);border-radius:99px;padding:5px 10px;font-size:13px}
+.perfil + .modo{margin-left:0}
+.modo{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:99px;border:1px solid var(--linea);color:var(--suave);white-space:nowrap}
+.modo.completa{border-color:var(--aviso);color:var(--aviso)}
+
+main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 430px;min-height:0}
+#mapa-caja{position:relative;min-height:320px}
+#mapa{position:absolute;inset:0;background:#0d1626}
+#barrido{position:absolute;inset:0;z-index:650;pointer-events:none}
+.leaflet-container{font:inherit;background:#0d1626}
+.leaflet-tile-pane{filter:brightness(.62) saturate(.55) contrast(1.1)}
+.leaflet-control-attribution{background:rgba(11,18,32,.8)!important;color:var(--suave)!important;font-size:11px}
+.leaflet-control-attribution a{color:var(--texto)!important}
+.leaflet-bar a{background:var(--panel2);color:var(--texto);border-color:var(--linea)}
+.leaflet-bar a:hover{background:var(--panel)}
+.consola{position:absolute;left:12px;bottom:26px;z-index:700;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--radar);background:rgba(11,18,32,.82);border:1px solid var(--linea);border-radius:8px;padding:8px 10px;max-width:min(360px,calc(100% - 24px));pointer-events:none}
+.consola b{color:var(--texto);font-weight:600}
+.consola.escaneo{min-width:min(330px,calc(100% - 24px));box-shadow:0 0 0 1px rgba(53,224,161,.25),0 0 28px rgba(53,224,161,.18)}
+.consola .tit{display:flex;justify-content:space-between;gap:12px;letter-spacing:.8px;text-transform:uppercase;font-size:11px;color:var(--radar)}
+.consola .tit .parpadeo{animation:parpadeo 1s steps(2) infinite}
+@keyframes parpadeo{50%{opacity:.25}}
+.consola .barra{height:3px;background:rgba(53,224,161,.15);border-radius:2px;margin:6px 0 7px;overflow:hidden}
+.consola .barra i{display:block;height:100%;background:var(--radar);box-shadow:0 0 8px var(--radar)}
+.consola .num{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.consola .num b{display:block;font-size:18px;font-variant-numeric:tabular-nums;color:var(--texto)}
+.consola .num span{font-size:10px;color:var(--suave);text-transform:uppercase;letter-spacing:.5px}
+.consola .log{color:#9fe8cb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.consola .log div{overflow:hidden;text-overflow:ellipsis}
+.consola .log div:last-child{color:var(--texto)}
+.consola .salta{margin-top:5px;font-size:10px;color:var(--tenue)}
+.inicio{position:absolute;inset:0;z-index:690;display:grid;place-items:center;text-align:center;padding:24px;background:radial-gradient(circle at 50% 45%,rgba(53,224,161,.10),rgba(11,18,32,.88) 60%)}
+.inicio h1{font-size:clamp(22px,3.2vw,34px);margin:0 0 8px;font-weight:650}
+.inicio p{color:var(--suave);max-width:520px;margin:0 auto 14px}
+.atajos{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.atajos button{background:var(--panel2);border:1px solid var(--linea);border-radius:99px;padding:6px 14px;cursor:pointer}
+.atajos button:hover{border-color:var(--radar)}
+
+aside{border-left:1px solid var(--linea);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.resumen{padding:14px 16px 10px;border-bottom:1px solid var(--linea)}
+.resumen h2{margin:0;font-size:19px;font-weight:650}
+.resumen p{margin:2px 0 0;color:var(--suave);font-size:13px}
+.cifras{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.cifras div{background:var(--panel2);border-radius:8px;padding:8px 10px}
+.cifras b{display:block;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.cifras span{font-size:12px;color:var(--suave)}
+.filtros{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--linea)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;border:1px solid var(--linea);background:transparent;cursor:pointer;font-size:13px;white-space:nowrap}
+.chip i{width:9px;height:9px;border-radius:50%;flex:none}
+.chip em{font-style:normal;color:var(--suave);font-variant-numeric:tabular-nums}
+.chip.off{opacity:.38}
+.mas{width:100%;padding:10px;margin:2px 0 8px;border-radius:var(--radio);border:1px dashed var(--linea);background:transparent;cursor:pointer;color:var(--suave)}
+.mas:hover{border-color:var(--radar);color:var(--texto)}
+.mas em{font-style:normal;color:var(--tenue)}
+.chip.sel{border-color:var(--radar);color:var(--radar)}
+.senales:empty{display:none}
+.senales .tit{font-size:12px;color:var(--tenue);align-self:center;margin-right:2px}
+.lista{flex:1;overflow:auto;padding:10px 12px 16px;scroll-behavior:smooth}
+.aviso{font-size:13px;color:var(--suave);padding:8px 6px}
+.fila{border:1px solid var(--linea);border-radius:var(--radio);background:var(--panel2);margin-bottom:8px;overflow:hidden}
+.fila.sel{border-color:var(--radar)}
+.cab{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;cursor:pointer;width:100%;text-align:left;background:none;border:0}
+.cab i{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none}
+.cab .nom{font-weight:600;line-height:1.3}
+.cab .sub{font-size:12.5px;color:var(--suave)}
+.pot{margin-left:auto;display:flex;gap:3px;align-items:flex-end;flex:none;padding-top:4px}
+.pot b{width:5px;background:var(--linea);border-radius:2px}
+.pot b:nth-child(1){height:8px}.pot b:nth-child(2){height:12px}.pot b:nth-child(3){height:16px}
+.pot b.on{background:var(--radar)}
+.etqs{display:flex;gap:5px;flex-wrap:wrap;padding:0 12px 10px 32px}
+.etq{font-size:12px;padding:2px 8px;border-radius:6px;background:rgba(248,113,113,.14);color:#fca5a5;white-space:nowrap}
+.etq.estado{background:rgba(147,161,189,.14);color:var(--suave)}
+.etq.bien{background:rgba(52,211,153,.14);color:#6ee7b7}
+.detalle{display:none;padding:2px 14px 14px;border-top:1px solid var(--linea)}
+.fila.abierta .detalle{display:block}
+.detalle h4{margin:12px 0 4px;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--tenue);font-weight:600}
+.detalle p{margin:0 0 6px}
+.detalle .nota{color:var(--suave);font-size:13px}
+.serv{background:var(--fondo);border:1px solid var(--linea);border-radius:8px;padding:8px 10px;margin-bottom:6px}
+.serv b{display:block}
+.serv .precio{font-variant-numeric:tabular-nums;color:var(--radar);font-weight:600}
+.serv .precio.pend{color:var(--aviso);font-weight:500}
+.serv small{color:var(--suave)}
+.datos{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px;color:var(--suave)}
+.datos b{color:var(--texto);font-weight:500}
+.botones{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.botones a{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--linea);text-decoration:none;color:var(--texto);font-size:13px;background:var(--panel)}
+.botones a:hover{border-color:var(--radar)}
+.botones a.pri{background:var(--radar);color:#04281b;border-color:var(--radar);font-weight:600}
+.cerradas{border:1px dashed var(--linea);border-radius:var(--radio);padding:12px 14px;color:var(--suave);font-size:13.5px;margin-top:4px}
+.cerradas b{color:var(--texto)}
+.censura{display:flex;gap:8px;align-items:center;margin:6px 0}
+.censura i{width:9px;height:9px;border-radius:50%;flex:none;opacity:.7}
+.censura span{height:9px;border-radius:4px;background:var(--linea);display:block}
+footer{padding:6px 16px;border-top:1px solid var(--linea);font-size:12px;color:var(--tenue);display:flex;gap:14px;flex-wrap:wrap;background:var(--panel)}
+footer a{color:var(--suave)}
+
+@media (max-width:860px){
+  main{grid-template-columns:1fr;grid-template-rows:46vh auto}
+  aside{border-left:0;border-top:1px solid var(--linea)}
+  .lista{overflow:visible}
+  body{display:block}
+  .modo{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca">
+    <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="13" fill="none" stroke="#35e0a1" stroke-width="1.4" opacity=".45"/><circle cx="15" cy="15" r="7.5" fill="none" stroke="#35e0a1" stroke-width="1.4" opacity=".7"/><path d="M15 15 L26 8" stroke="#35e0a1" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="15" r="2.2" fill="#35e0a1"/></svg>
+    <div><span id="titulo">Radar</span><small id="lema"></small></div>
+  </div>
+  <div class="busca">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Busca un municipio…" autocomplete="off" aria-label="Municipio" aria-controls="sug">
+    <div class="sug" id="sug" role="listbox"></div>
+  </div>
+  <select id="perfil" class="perfil" aria-label="Perfil del radar" hidden></select>
+  <span class="modo" id="modo">Versión gratis</span>
+</header>
+
+<main>
+  <div id="mapa-caja">
+    <div id="mapa"></div>
+    <canvas id="barrido"></canvas>
+    <div class="consola" id="consola" hidden></div>
+    <div class="inicio" id="inicio">
+      <div>
+        <h1 id="titular"></h1>
+        <p id="intro"></p>
+        <div class="atajos" id="atajos"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="resumen" id="resumen">
+      <h2>Elige un municipio</h2>
+      <p>Escribe arriba o toca uno de los atajos del mapa.</p>
+    </div>
+    <div class="filtros" id="filtros"></div>
+    <div class="filtros senales" id="senales"></div>
+    <div class="lista" id="lista"></div>
+  </aside>
+</main>
+
+<footer>
+  <span id="pie-datos">Cargando…</span>
+  <span>Fuentes: Registro General de Centros, Servicios y Establecimientos Sanitarios (Ministerio de Sanidad) · mapa y datos: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© colaboradores de OpenStreetMap</a></span>
+  <span id="pie-tiempo"></span>
+  <span>Demo para socios · uso interno · no reenviar</span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>window.RADAR_CIFRADO = {"sal": "aeDPxUCIhBp+HbKfXowcGQ==", "iter": 600000, "prueba": "vZqtciClq9VcKc2HFVC669U/ArWGeDob5bRpqUx2iMw5+m84"};</script>
+<script>
+"use strict";
+/* ───────────────────────── Estado ───────────────────────── */
+const PARAMS = new URLSearchParams(location.search);
+// Demo para socios (D-024): si la página lleva RADAR_CIFRADO, los datos van cifrados y se pide una contraseña.
+const CIFRADO = window.RADAR_CIFRADO || null;
+let CLAVE = null;
+const MODO = CIFRADO || PARAMS.get("modo") === "completa" ? "c" : "f";
+let PERFIL = PARAMS.get("perfil");      // si no viene, se usa el primero de datos/_perfiles.js
+let PERFILES = [];
+const BARRIDO_MS = 4800;      // el barrido es escenografía (D-023): los datos cargan en menos de 1 s; un clic o mover el mapa lo salta
+let CFG = null, CIUDADES = [], mapa = null, capa = null, lienzo = null;
+let actual = null;            // fichero del municipio cargado
+let apagados = new Set();     // sectores ocultos
+let senal = null;             // carencia o estado por el que se filtra, si hay
+let limite = 60;              // fichas dibujadas en la lista; el botón «Mostrar más» lo sube
+let marcas = [];              // marcadores por punto
+let t0 = 0, animacion = 0;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const plano = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const euros = n => n.toLocaleString("es-ES") + " €";
+
+/* ───────────────────────── Carga JSONP ───────────────────────── */
+const b64 = s => Uint8Array.from(atob(s.trim()), c => c.charCodeAt(0));
+async function descifra(texto){
+  const d = b64(texto);
+  const plano = await crypto.subtle.decrypt({name: "AES-GCM", iv: d.slice(0, 12)}, CLAVE, d.slice(12));
+  return new TextDecoder().decode(plano);
+}
+async function derivaClave(contrasena){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(contrasena), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({name: "PBKDF2", salt: b64(CIFRADO.sal), iterations: CIFRADO.iter, hash: "SHA-256"},
+    base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+}
+function pideClave(){
+  return new Promise(ok => {
+    const caja = document.createElement("div");
+    caja.className = "inicio"; caja.style.zIndex = 2000; caja.style.position = "fixed";
+    caja.innerHTML = `<form style="max-width:360px;width:100%"><h1 style="font-size:20px">Versión completa · acceso de socios</h1>
+      <p style="color:var(--suave)">Lleva datos de contacto. Uso interno de Data Goal: no reenvíes la contraseña.</p>
+      <input type="password" autocomplete="current-password" placeholder="Contraseña" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--linea);background:var(--fondo);color:var(--texto)">
+      <button style="margin-top:10px;padding:9px 16px;border-radius:99px;border:1px solid var(--radar);background:transparent;color:var(--radar);cursor:pointer">Entrar</button>
+      <p class="err" style="color:var(--alerta);min-height:1.4em"></p></form>`;
+    document.body.appendChild(caja);
+    const form = caja.querySelector("form"), inp = caja.querySelector("input"), err = caja.querySelector(".err");
+    const prueba = async pw => {
+      try { CLAVE = await derivaClave(pw); if (await descifra(CIFRADO.prueba) !== "radar-ok") throw 0; }
+      catch (e) { CLAVE = null; return false; }
+      try { sessionStorage.setItem("radar-clave", pw); } catch (e) {}
+      caja.remove(); ok(); return true;
+    };
+    form.onsubmit = async e => { e.preventDefault(); err.textContent = "Comprobando…";
+      if (!(await prueba(inp.value))) err.textContent = "Contraseña incorrecta."; };
+    let guardada = null; try { guardada = sessionStorage.getItem("radar-clave"); } catch (e) {}
+    if (guardada) prueba(guardada); else inp.focus();
+  });
+}
+function cargaScript(src){
+  if (CIFRADO) return fetch(src.replace(/\.js$/, ".cif"), {cache: "no-cache"}).then(r => {
+      if (!r.ok) throw new Error("No se pudo cargar " + src); return r.text(); })
+    .then(descifra).then(js => new Promise((ok, mal) => {
+      const s = document.createElement("script"), url = URL.createObjectURL(new Blob([js], {type: "text/javascript"}));
+      s.src = url; s.onload = () => { s.remove(); URL.revokeObjectURL(url); ok(); };
+      s.onerror = () => { s.remove(); mal(new Error("No se pudo cargar " + src)); };
+      document.head.appendChild(s);
+    }));
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = () => { s.remove(); ok(); };
+    s.onerror = () => { s.remove(); mal(new Error("No se pudo cargar " + src)); };
+    document.head.appendChild(s);
+  });
+}
+window.RADAR_PERFILES = d => { PERFILES = d; };
+window.RADAR_CONFIG = d => { CFG = d; };
+window.RADAR_CIUDADES = d => { CIUDADES = d; };
+window.RADAR_DATOS = d => { actual = d; };
+
+/* ───────────────────────── Arranque ───────────────────────── */
+async function arranca(){
+  $("modo").textContent = MODO === "c" ? "Versión completa · uso interno" : "Versión gratis";
+  $("modo").classList.toggle("completa", MODO === "c");
+  mapa = L.map("mapa", {zoomControl: true, preferCanvas: true, fadeAnimation: false}).setView([37.18, -3.6], 9);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">colaboradores de OpenStreetMap</a>'
+  }).addTo(mapa);
+  capa = L.layerGroup().addTo(mapa);
+  lienzo = $("barrido");
+  new ResizeObserver(() => mapa.invalidateSize(false)).observe($("mapa-caja"));
+  try {
+    await cargaScript("datos/_perfiles.js");
+    if (!PERFILES.some(x => x[0] === PERFIL)) PERFIL = PERFILES[0][0];
+    await Promise.all([cargaScript(`datos/${PERFIL}/_config.js`), cargaScript(`datos/${PERFIL}/_ciudades.js`)]);
+  } catch (e) {
+    $("pie-datos").textContent = "No se encuentran los datos. Ejecuta el pipeline (pasos 01 a 04).";
+    return;
+  }
+  // Todos los textos salen del perfil: la página no lleva ninguno de un sector concreto.
+  document.title = CFG.ui.titulo + " · Data Goal";
+  $("titulo").textContent = CFG.ui.titulo;
+  $("titular").textContent = CFG.ui.titular;
+  $("intro").textContent = CFG.ui.intro;
+  $("lema").textContent = "Provincia de " + CFG.provincia;
+  if (PERFILES.length > 1) {
+    const sel = $("perfil");
+    sel.innerHTML = PERFILES.map(x => `<option value="${esc(x[0])}"${x[0] === PERFIL ? " selected" : ""}>${esc(x[1])}</option>`).join("");
+    sel.hidden = false;
+    sel.onchange = () => { PARAMS.set("perfil", sel.value); location.href = location.pathname + "?" + PARAMS.toString(); };
+  }
+  $("pie-datos").textContent = `${CFG.total.toLocaleString("es-ES")} ${CFG.ui.negocios} en ${CFG.municipios} municipios · datos del ${CFG.fecha.split("-").reverse().join("/")}`;
+  $("atajos").innerHTML = CIUDADES.slice(0, 6).map(c => `<button data-s="${esc(c[1])}">${esc(c[0])} · ${c[4]}</button>`).join("");
+  $("atajos").onclick = e => { const b = e.target.closest("button"); if (b) elige(b.dataset.s); };
+  preparaBuscador();
+  const inicial = decodeURIComponent(location.hash.slice(1));
+  if (inicial && CIUDADES.some(c => c[1] === inicial)) elige(inicial);
+  window.addEventListener("hashchange", () => {
+    const s = decodeURIComponent(location.hash.slice(1));
+    if (s && (!actual || actual.s !== s) && CIUDADES.some(c => c[1] === s)) elige(s);
+  });
+}
+
+/* ───────────────────────── Buscador con sugerencias ───────────────────────── */
+function preparaBuscador(){
+  const q = $("q"), caja = $("sug");
+  let activa = -1, vistas = [];
+  const pinta = () => {
+    const t = plano(q.value.trim());
+    vistas = (t ? CIUDADES.filter(c => plano(c[0]).includes(t)) : CIUDADES)
+      .sort((a, b) => t ? (plano(a[0]).startsWith(t) ? 0 : 1) - (plano(b[0]).startsWith(t) ? 0 : 1) || b[4] - a[4] : 0)
+      .slice(0, 12);
+    activa = vistas.length ? 0 : -1;
+    caja.innerHTML = vistas.length
+      ? vistas.map((c, i) => `<div role="option" data-i="${i}" class="${i === activa ? "activa" : ""}">${esc(c[0])}<span>${c[4]} ${c[4] === 1 ? "negocio" : "negocios"}</span></div>`).join("")
+      : `<div class="vacia">Sin datos para ese municipio. OpenStreetMap solo cubre ${CFG.municipios} municipios de la provincia.</div>`;
+    caja.classList.add("abierta");
+  };
+  const marca = () => [...caja.children].forEach((d, i) => d.classList.toggle("activa", i === activa));
+  q.addEventListener("input", pinta);
+  q.addEventListener("focus", pinta);
+  q.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { activa = Math.min(activa + 1, vistas.length - 1); marca(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { activa = Math.max(activa - 1, 0); marca(); e.preventDefault(); }
+    else if (e.key === "Enter" && vistas[activa]) { elige(vistas[activa][1]); q.blur(); }
+    else if (e.key === "Escape") { caja.classList.remove("abierta"); }
+  });
+  caja.addEventListener("mousedown", e => {
+    const d = e.target.closest("[data-i]");
+    if (d) { elige(vistas[+d.dataset.i][1]); q.blur(); }
+  });
+  q.addEventListener("blur", () => setTimeout(() => caja.classList.remove("abierta"), 120));
+}
+
+/* ───────────────────────── Elegir municipio ───────────────────────── */
+async function elige(slug){
+  const c = CIUDADES.find(x => x[1] === slug);
+  if (!c) return;
+  t0 = performance.now();
+  $("q").value = c[0];
+  $("sug").classList.remove("abierta");
+  $("inicio").hidden = true; $("inicio").style.display = "none";
+  cancelAnimationFrame(animacion); clearTimeout(window.__reloj);
+  actual = null;
+  try { await cargaScript(`datos/${PERFIL}/${MODO}/${slug}.js`); }
+  catch (e) { $("resumen").innerHTML = `<h2>${esc(c[0])}</h2><p>No se pudo cargar el fichero del municipio.</p>`; return; }
+  if (!actual) return;
+  const tDatos = performance.now() - t0;
+  history.replaceState(null, "", "#" + encodeURIComponent(slug));
+  apagados = new Set(); senal = null; limite = 60;
+  pintaPanel();
+  pintaMapa(tDatos);
+}
+
+/* ───────────────────────── Mapa y barrido ───────────────────────── */
+function pintaMapa(tDatos){
+  cancelAnimationFrame(animacion); clearTimeout(window.__reloj);
+  if (window.__finBarrido) mapa.off("mousedown movestart", window.__finBarrido);
+  const yo = window.__barridoN = (window.__barridoN || 0) + 1;   // un barrido viejo no pinta sobre uno nuevo
+  capa.clearLayers(); marcas = [];
+  const P = actual.p;
+  mapa.invalidateSize(false);
+  const limites = L.latLngBounds(P.map(p => [p[0], p[1]]));
+  mapa.fitBounds(limites.pad(0.18), {animate: false, maxZoom: 16});
+  const centro = mapa.latLngToContainerPoint(limites.getCenter());
+  const reducido = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Cada punto se enciende cuando el barrido pasa por su ángulo, con un destello.
+  const pendientes = P.map((p, i) => {
+    const xy = mapa.latLngToContainerPoint([p[0], p[1]]);
+    let a = Math.atan2(xy.y - centro.y, xy.x - centro.x) + Math.PI / 2;   // 0 = arriba
+    if (a < 0) a += 2 * Math.PI;
+    return {i, a, x: xy.x, y: xy.y};
+  }).sort((x, y) => x.a - y.a);
+
+  const pings = [], log = [];
+  let nAlto = 0, nCar = 0, ultimoLog = -1e9;
+  const may = s => s ? s[0].toUpperCase() + s.slice(1) : "";
+  const enciende = (k, ahora) => {
+    const {i, x, y} = pendientes[k];
+    const p = P[i], sec = CFG.sectores[p[2]], abierta = p[4] >= 0;
+    const m = L.circleMarker([p[0], p[1]], {
+      radius: 4.5 + p[3] * 1.6, color: abierta ? "#ffffff" : sec[3], weight: abierta ? 1.6 : 1,
+      fillColor: sec[3], fillOpacity: abierta ? .95 : .55, opacity: abierta ? .95 : .7
+    });
+    m._sector = sec[0]; m._ficha = p[4];
+    m.on("click", () => abierta ? abreFicha(p[4], true) : avisaCerrada(m, sec));
+    if (abierta) m.bindTooltip(actual.n[p[4]][0], {direction: "top", offset: [0, -6]});
+    if (visible(m)) m.addTo(capa);
+    marcas[i] = m;
+    if (p[3] >= 2) nAlto++;
+    const f = abierta ? actual.n[p[4]] : null;
+    if (f && f[2].length) nCar++;
+    if (ahora === undefined) return;
+    pings.push({x, y, t: ahora, c: sec[3], fuerte: p[3] >= 2 || (f && f[2].length)});
+    // Registro: lo interesante siempre, el resto a ritmo
+    const interesa = f && f[2].length;
+    if (interesa || ahora - ultimoLog > 140) {
+      ultimoLog = ahora;
+      log.push(f ? `▸ ${esc(f[0])}${f[2].length ? ` · <span style="color:#fca5a5">${esc(CFG.carencias[f[2][0]][1].toLowerCase())}</span>` : ""}`
+                 : `▸ ${esc(may(sec[2]))}${p[3] >= 2 ? " · potencial alto" : ""} · ${p[0].toFixed(3)}, ${p[1].toFixed(3)}`);
+      if (log.length > 4) log.shift();
+    }
+  };
+
+  const consola = $("consola");
+  consola.hidden = false;
+  const ctx = lienzo.getContext("2d");
+  const ajusta = () => { const r = lienzo.getBoundingClientRect(), d = devicePixelRatio || 1;
+    lienzo.width = r.width * d; lienzo.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); return r; };
+  const caja = ajusta();
+  const radio = Math.hypot(Math.max(centro.x, caja.width - centro.x), Math.max(centro.y, caja.height - centro.y));
+  const inicio = performance.now();
+  let hechos = 0;
+
+  const verde = a => `rgba(53,224,161,${a})`;
+  const rejilla = (alfa) => {
+    ctx.strokeStyle = verde(.13 * alfa); ctx.lineWidth = 1;
+    for (let k = 1; k <= 5; k++) { ctx.beginPath(); ctx.arc(centro.x, centro.y, radio * k / 5.4, 0, 2 * Math.PI); ctx.stroke(); }
+    ctx.strokeStyle = verde(.08 * alfa);
+    for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6;
+      ctx.beginPath(); ctx.moveTo(centro.x, centro.y); ctx.lineTo(centro.x + radio * Math.cos(a), centro.y + radio * Math.sin(a)); ctx.stroke(); }
+  };
+  const destellos = ahora => {
+    for (let k = pings.length - 1; k >= 0; k--) {
+      const g = pings[k], e = (ahora - g.t) / 900;
+      if (e >= 1) { pings.splice(k, 1); continue; }
+      ctx.beginPath(); ctx.arc(g.x, g.y, 3 + e * (g.fuerte ? 26 : 14), 0, 2 * Math.PI);
+      ctx.strokeStyle = g.c; ctx.globalAlpha = (1 - e) * (g.fuerte ? .95 : .55); ctx.lineWidth = g.fuerte ? 2 : 1.2; ctx.stroke();
+      if (e < .25) { ctx.beginPath(); ctx.arc(g.x, g.y, 7 * (1 - e * 4) + 2, 0, 2 * Math.PI); ctx.fillStyle = "#ffffff"; ctx.globalAlpha = (1 - e * 4) * .8; ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+  };
+  const fmt = n => n.toLocaleString("es-ES");
+  const hud = f => {
+    consola.className = "consola escaneo";
+    consola.innerHTML = `<div class="tit"><span><span class="parpadeo">●</span> Escaneando ${esc(actual.m)}</span><span>${Math.round(f * 100)} %</span></div>
+      <div class="barra"><i style="width:${(f * 100).toFixed(1)}%"></i></div>
+      <div class="num"><div><b>${fmt(hechos)}</b><span>localizados</span></div><div><b>${fmt(nAlto)}</b><span>potencial alto</span></div><div><b>${fmt(nCar)}</b><span>con carencia</span></div></div>
+      <div class="log">${log.map(l => `<div>${l}</div>`).join("")}</div>
+      <div class="salta">Clic en el mapa para saltar</div>`;
+  };
+
+  let acabado = false;
+  const fin = () => {
+    if (acabado || yo !== window.__barridoN) return;
+    acabado = true;
+    clearTimeout(reloj); cancelAnimationFrame(animacion);
+    mapa.off("mousedown movestart", fin);
+    while (hechos < pendientes.length) enciende(hechos++);
+    ctx.clearRect(0, 0, caja.width, caja.height);
+    const total = performance.now() - t0;
+    consola.className = "consola";
+    consola.innerHTML = `<b>${esc(actual.m)}</b> · ${fmt(P.length)} ${P.length === 1 ? "negocio" : "negocios"} en el radar · ${fmt(nAlto)} con potencial alto`;
+    $("pie-tiempo").textContent = `Datos en ${Math.round(tDatos)} ms · barrido de ${(BARRIDO_MS / 1000).toLocaleString("es-ES")} s`;
+    window.__radarTiempo = {datos: Math.round(tDatos), total: Math.round(total), puntos: P.length};
+  };
+  // El barrido es escenografía: pase lo que pase con la animación (pestaña en segundo plano,
+  // equipo lento), al acabar su tiempo todos los puntos están pintados. Un clic o mover el mapa lo salta.
+  const reloj = window.__reloj = setTimeout(fin, BARRIDO_MS + 900);
+  if (reducido) { fin(); return; }
+  window.__finBarrido = fin;
+  setTimeout(() => { if (!acabado && yo === window.__barridoN) mapa.on("mousedown movestart", fin); }, 50);
+
+  const paso = ahora => {
+    const f = Math.min(1, (ahora - inicio) / BARRIDO_MS);
+    const suave = f < .5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2;     // arranca y frena
+    const ang = suave * 2 * Math.PI;
+    while (hechos < pendientes.length && pendientes[hechos].a <= ang) enciende(hechos++, ahora);
+    ctx.clearRect(0, 0, caja.width, caja.height);
+    rejilla(1);
+    // Estela del barrido
+    const a0 = ang - Math.PI / 2;
+    for (let k = 0; k < 40; k++) {
+      ctx.beginPath(); ctx.moveTo(centro.x, centro.y);
+      ctx.arc(centro.x, centro.y, radio, a0 - (k + 1) * 0.022, a0 - k * 0.022); ctx.closePath();
+      ctx.fillStyle = verde(0.26 * Math.pow(1 - k / 40, 1.6)); ctx.fill();
+    }
+    ctx.save(); ctx.shadowColor = "#35e0a1"; ctx.shadowBlur = 14;
+    ctx.strokeStyle = verde(.98); ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(centro.x, centro.y);
+    ctx.lineTo(centro.x + radio * Math.cos(a0), centro.y + radio * Math.sin(a0)); ctx.stroke(); ctx.restore();
+    // Pulso en el centro
+    const pul = (ahora - inicio) % 1200 / 1200;
+    ctx.beginPath(); ctx.arc(centro.x, centro.y, 4 + pul * 22, 0, 2 * Math.PI);
+    ctx.strokeStyle = verde(.6 * (1 - pul)); ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(centro.x, centro.y, 3.5, 0, 2 * Math.PI); ctx.fillStyle = verde(1); ctx.fill();
+    destellos(ahora);
+    hud(f);
+    if (acabado || yo !== window.__barridoN) return;
+    if (f < 1 || pings.length) animacion = requestAnimationFrame(paso);
+    else fin();
+  };
+  hud(0);
+  animacion = requestAnimationFrame(paso);
+}
+
+// Un punto se ve si su sector está encendido y, cuando hay filtro por señal, si su ficha la tiene.
+const tieneSenal = f => !senal || f[2].includes(senal) || f[3].includes(senal);
+const visible = m => !apagados.has(m._sector) && (!senal || (m._ficha >= 0 && tieneSenal(actual.n[m._ficha])));
+function refrescaMapa(){ marcas.forEach(m => { if (m) visible(m) ? m.addTo(capa) : capa.removeLayer(m); }); }
+
+function avisaCerrada(m, sec){
+  m.bindPopup(`<b>${esc(sec[2][0].toUpperCase() + sec[2].slice(1))}</b><br>Ficha cerrada en la versión gratis.`, {closeButton: false}).openPopup();
+}
+
+/* ───────────────────────── Panel ───────────────────────── */
+function pintaPanel(){
+  const P = actual.p, N = actual.n;
+  const conCarencia = N.filter(f => f[2].length).length;
+  const alto = P.filter(p => p[3] >= 2).length;
+  $("resumen").innerHTML = `
+    <h2>${esc(actual.m)}</h2>
+    <p>${P.length} ${esc(CFG.ui.negocios)} en el radar${actual.g ? ` · ${N.length} ${N.length === 1 ? "ficha abierta" : "fichas abiertas"}` : ""}</p>
+    <div class="cifras">
+      <div><b>${P.length}</b><span>en el radar</span></div>
+      <div><b>${alto}</b><span>potencial medio o alto</span></div>
+      <div><b>${actual.g ? N.length : conCarencia}</b><span>${actual.g ? "fichas abiertas" : "con carencia afirmada"}</span></div>
+    </div>`;
+  $("filtros").innerHTML = CFG.sectores.filter(s => actual.c[s[0]]).map(s =>
+    `<button class="chip" data-s="${s[0]}" aria-pressed="true"><i style="background:${s[3]}"></i>${esc(s[1])} <em>${actual.c[s[0]]}</em></button>`).join("");
+  $("filtros").onclick = e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    const s = b.dataset.s;
+    apagados.has(s) ? apagados.delete(s) : apagados.add(s);
+    b.classList.toggle("off", apagados.has(s)); b.setAttribute("aria-pressed", !apagados.has(s));
+    refrescaMapa();
+    pintaLista();
+  };
+  // Filtro por señal: cuántas fichas tienen cada carencia y cada estado.
+  const cuenta = {};
+  N.forEach(f => f[2].concat(f[3]).forEach(k => { cuenta[k] = (cuenta[k] || 0) + 1; }));
+  const claves = Object.keys(CFG.carencias).concat(Object.keys(CFG.estados)).filter(k => cuenta[k]);
+  const rotulo = k => CFG.carencias[k] ? CFG.carencias[k][1] : CFG.estados[k][3];
+  $("senales").innerHTML = claves.length > 1
+    ? `<span class="tit">Filtrar por señal</span>` + claves.map(k =>
+        `<button class="chip" data-k="${k}" aria-pressed="false">${esc(rotulo(k))} <em>${cuenta[k]}</em></button>`).join("")
+    : "";
+  $("senales").onclick = e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    senal = senal === b.dataset.k ? null : b.dataset.k;
+    $("senales").querySelectorAll(".chip").forEach(x => {
+      x.classList.toggle("sel", x.dataset.k === senal); x.setAttribute("aria-pressed", x.dataset.k === senal); });
+    refrescaMapa();
+    pintaLista();
+  };
+  pintaLista();
+}
+
+function pintaLista(){
+  const N = actual.n, sec = Object.fromEntries(CFG.sectores.map(s => [s[0], s]));
+  const todas = N.map((f, i) => [f, i]).filter(([f]) => !apagados.has(f[1]) && tieneSenal(f));
+  // Las fichas vienen ordenadas por potencial. Se dibujan las primeras: con 1.300 de golpe la página tarda.
+  const filas = todas.slice(0, limite);
+  let h = filas.map(([f, i]) => `
+    <div class="fila" id="ficha-${i}">
+      <button class="cab" data-i="${i}" aria-expanded="false">
+        <i style="background:${sec[f[1]][3]}"></i>
+        <div><div class="nom">${esc(f[0])}</div><div class="sub">${esc(sec[f[1]][1])}${f[8] ? " · " + esc(f[8]) : ""}</div></div>
+        <div class="pot" title="Potencial ${f[4]} de 3" aria-label="Potencial ${f[4]} de 3">${[1, 2, 3].map(k => `<b class="${k <= f[4] ? "on" : ""}"></b>`).join("")}</div>
+      </button>
+      <div class="etqs">${etiquetas(f)}</div>
+      <div class="detalle"></div>
+    </div>`).join("");
+  if (!filas.length) h = `<div class="aviso">Ningún negocio con los filtros elegidos.</div>`;
+  if (todas.length > filas.length) {
+    h += `<button class="mas" id="mas">Mostrar ${Math.min(60, todas.length - filas.length)} más <em>(quedan ${todas.length - filas.length})</em></button>`;
+  }
+  if (actual.g) {
+    const cerradas = actual.p.filter(p => p[4] < 0 && !apagados.has(CFG.sectores[p[2]][0]));
+    if (cerradas.length) {
+      const muestra = cerradas.slice(0, 5).map((p, k) => `<div class="censura"><i style="background:${CFG.sectores[p[2]][3]}"></i><span style="width:${46 + (k * 37) % 40}%"></span></div>`).join("");
+      h += `<div class="cerradas"><b>${cerradas.length} ${cerradas.length === 1 ? "ficha más" : "fichas más"}</b> en ${esc(actual.m)}, visibles en el mapa y cerradas en la versión gratis.${muestra}</div>`;
+    }
+  }
+  $("lista").innerHTML = h;
+  $("lista").onclick = e => {
+    if (e.target.closest("#mas")) { limite += 60; pintaLista(); return; }
+    const b = e.target.closest(".cab"); if (b) abreFicha(+b.dataset.i, false);
+  };
+}
+
+function etiquetas(f){
+  const car = f[2].map(c => `<span class="etq">${esc(CFG.carencias[c][1])}</span>`);
+  const est = f[3].map(c => `<span class="etq ${CFG.estados[c][2] ? "bien" : "estado"}">${rellena(CFG.estados[c][0], f[13])}</span>`);
+  return car.concat(est).join("") || `<span class="etq bien">Sin carencias a la vista</span>`;
+}
+
+function abreFicha(i, desdeMapa){
+  let fila = $("ficha-" + i);
+  if (!fila) { limite = actual.n.length; pintaLista(); fila = $("ficha-" + i); }   // un punto del mapa fuera de las primeras
+  if (!fila) return;
+  const abierta = fila.classList.contains("abierta");
+  document.querySelectorAll(".fila.abierta").forEach(x => { x.classList.remove("abierta", "sel"); x.querySelector(".cab").setAttribute("aria-expanded", "false"); });
+  if (abierta && !desdeMapa) return;
+  fila.querySelector(".detalle").innerHTML = detalle(actual.n[i], i);
+  fila.classList.add("abierta", "sel");
+  fila.querySelector(".cab").setAttribute("aria-expanded", "true");
+  if (desdeMapa) fila.scrollIntoView({block: "nearest"});
+  else { const f = actual.n[i]; mapa.panTo([f[6], f[7]], {animate: true}); }
+}
+
+/* ───────────────────────── Diagnóstico por plantillas ───────────────────────── */
+// Las frases de cada carencia y de cada estado vienen del perfil (datos/<perfil>/_config.js).
+// Cada carencia trae dos o tres redacciones; se elige por el índice de la ficha para que
+// dos fichas seguidas no digan lo mismo. Entre llaves van datos de la ficha: {an}, {pl}, {mot}…
+const rellena = (texto, d) => esc(texto).replace(/\{(\w+)\}/g, (_, k) => esc(Array.isArray(d[k]) ? lista(d[k]) : (d[k] ?? "")));
+const fraseCarencia = (c, d, i) => { const fr = CFG.carencias[c][3]; return rellena(fr[i % fr.length], d); };
+const fraseEstado = (e, d) => rellena(CFG.estados[e][1], d) + (e === "wnl" && d.ro ? ` Sí constan sus redes (${esc(lista(d.ro))}).` : "");
+const lista = a => (a || []).length > 1 ? a.slice(0, -1).join(", ") + " y " + a[a.length - 1] : (a || [""])[0];
+
+function detalle(f, i){
+  const [nombre, sector, car, est, nivel, tam, lat, lon, dir, tel, correo, web, servicios, d, id] = f;
+  const sec = CFG.sectores.find(s => s[0] === sector);
+  const frases = car.map(c => fraseCarencia(c, d, i));
+  const dudas = est.filter(e => !CFG.estados[e][2]).map(e => fraseEstado(e, d));
+  const bien = est.filter(e => CFG.estados[e][2]).map(e => fraseEstado(e, d));
+  if (d.pl && d.pl.length && !bien.length && !est.includes("plataforma")) bien.push(`Da cita online con ${esc(lista(d.pl))}.`);
+  if (d.wa || d.ch) bien.push("Atiende por WhatsApp o chat desde la web.");
+  if (d.ti) bien.push(`Vende online (${esc(d.ti)}).`);
+
+  // Contexto: horario y competencia
+  const ctx = [];
+  if (d.hm && car.includes("cita")) ctx.push("Según su horario, cierra a mediodía; sin cita online, quien llame en esas horas tiene que volver a intentarlo.");
+  else if (d.ht && car.includes("cita")) ctx.push(`Según su horario, no abre por la tarde (cierra a las ${d.hc}); sin cita online, por la tarde no hay forma de reservar.`);
+  if (d.h24) ctx.push("Según su horario, abre las 24 horas.");
+  else if (d.ha) ctx.push(`Según su horario, no cierra a mediodía y abre hasta las ${esc(d.hc)}.`);
+  if (d.vn) ctx.push(`A ${d.vd < 1000 ? d.vd + " m" : (d.vd / 1000).toLocaleString("es-ES", {maximumFractionDigits: 1}) + " km"}, ${esc(d.vn)} sí ${d.vt}.`);
+  if (d.b1) ctx.push(`Tiene ${d.b1} ${d.b1 === 1 ? "negocio" : "negocios"} del mismo sector a menos de 1 km${d.cp > d.b1 ? ` y ${d.cp} en todo el municipio` : ""}.`);
+  else if (d.cp) ctx.push(`Hay ${d.cp} ${d.cp === 1 ? "negocio" : "negocios"} más del mismo sector en el municipio, ninguno a menos de 1 km.`);
+
+  let h = "";
+  if (frases.length) h += `<h4>Qué se ve desde fuera</h4>` + frases.map(x => `<p>${x}</p>`).join("");
+  if (bien.length) h += `<h4>Lo que sí tiene</h4>` + bien.map(x => `<p>${x}</p>`).join("");
+  if (dudas.length) h += `<h4>A tener en cuenta</h4>` + dudas.map(x => `<p class="nota">${x}</p>`).join("");
+  if (ctx.length) h += `<h4>Su zona</h4>` + ctx.map(x => `<p>${x}</p>`).join("");
+
+  h += `<h4>Qué proponerle</h4>`;
+  if (servicios.length) {
+    h += servicios.map(([clave, alta, mes, k]) => {
+      const s = CFG.servicios[clave];
+      const precio = alta == null
+        ? `<span class="precio pend">Tarifa por fijar · multiplicador ×${k.toLocaleString("es-ES", {minimumFractionDigits: 2})}</span>`
+        : `<span class="precio">${euros(alta)} de implantación + ${euros(mes)}/mes</span>`;
+      return `<div class="serv"><b>${esc(s[0])}</b>${esc(s[1][0].toUpperCase() + s[1].slice(1))}.<br>${precio}<br><small>base × factor de sector × factor de tamaño (${tam})${alta == null ? "" : " · " + esc(s[2])}</small></div>`;
+    }).join("");
+  } else {
+    h += `<p class="nota">Con lo que se ve desde fuera no hay una propuesta clara${est.includes("wnl") ? ": primero hay que verificar si tiene web" : ""}.</p>`;
+  }
+
+  const tams = {S: "pequeño", M: "mediano", L: "grande"};
+  h += `<h4>Ficha</h4><div class="datos">
+    <span>Tamaño estimado</span><b>${tams[tam]}${d.ind && d.ind.length ? " · " + esc(d.ind.join("; ")) : " · sin indicios de tamaño a la vista"}</b>
+    <span>Potencial</span><b>${nivel} de 3</b>
+    ${d.of ? `<span>Autorizado para</span><b>${esc(d.of.join(", "))}</b>` : ""}
+    ${d.aprox ? `<span>Ubicación</span><b>aproximada: centro del municipio</b>` : ""}
+    ${web ? `<span>Web</span><b>${esc(web.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))}${d.wo ? " · localizada por el radar, no por la fuente" : ""}${d.tt ? ` · responde en ${String(d.tt).replace(".", ",")} s` : ""}</b>` : ""}
+    ${d.rd && d.rd.length ? `<span>Redes</span><b>${esc(d.rd.join(", "))}</b>` : ""}
+    ${dir ? `<span>Dirección</span><b>${esc(dir)}</b>` : ""}
+  </div>`;
+
+  const b = [];
+  if (tel) b.push(`<a class="pri" href="tel:${esc(tel)}">Llamar ${esc(tel.replace("+34", ""))}</a>`);
+  if (/^\+34[67]/.test(tel)) b.push(`<a href="https://wa.me/${esc(tel.slice(1))}" target="_blank" rel="noopener">WhatsApp</a>`);
+  if (correo) b.push(`<a href="mailto:${esc(correo)}">Correo</a>`);
+  if (web && !car.includes("caida")) b.push(`<a href="${esc(web)}" target="_blank" rel="noopener noreferrer">Abrir web</a>`);
+  b.push(`<a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=19/${lat}/${lon}" target="_blank" rel="noopener">Ver en el mapa</a>`);
+  h += `<div class="botones">${b.join("")}</div>`;
+  if (actual.g) h += `<p class="nota" style="margin-top:8px">Teléfono y correo no se muestran en la versión gratis.</p>`;
+  return h;
+}
+
+CIFRADO ? pideClave().then(arranca) : arranca();
+</script>
+</body>
+</html>

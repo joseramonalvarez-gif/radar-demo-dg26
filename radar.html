@@ -192,7 +192,10 @@ footer a{color:var(--suave)}
 "use strict";
 /* ───────────────────────── Estado ───────────────────────── */
 const PARAMS = new URLSearchParams(location.search);
-const MODO = PARAMS.get("modo") === "completa" ? "c" : "f";
+// Demo para socios (D-024): si la página lleva RADAR_CIFRADO, los datos van cifrados y se pide una contraseña.
+const CIFRADO = window.RADAR_CIFRADO || null;
+let CLAVE = null;
+const MODO = CIFRADO || PARAMS.get("modo") === "completa" ? "c" : "f";
 let PERFIL = PARAMS.get("perfil");      // si no viene, se usa el primero de datos/_perfiles.js
 let PERFILES = [];
 const BARRIDO_MS = 4800;      // el barrido es escenografía (D-023): los datos cargan en menos de 1 s; un clic o mover el mapa lo salta
@@ -210,7 +213,49 @@ const plano = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCas
 const euros = n => n.toLocaleString("es-ES") + " €";
 
 /* ───────────────────────── Carga JSONP ───────────────────────── */
+const b64 = s => Uint8Array.from(atob(s.trim()), c => c.charCodeAt(0));
+async function descifra(texto){
+  const d = b64(texto);
+  const plano = await crypto.subtle.decrypt({name: "AES-GCM", iv: d.slice(0, 12)}, CLAVE, d.slice(12));
+  return new TextDecoder().decode(plano);
+}
+async function derivaClave(contrasena){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(contrasena), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({name: "PBKDF2", salt: b64(CIFRADO.sal), iterations: CIFRADO.iter, hash: "SHA-256"},
+    base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+}
+function pideClave(){
+  return new Promise(ok => {
+    const caja = document.createElement("div");
+    caja.className = "inicio"; caja.style.zIndex = 2000; caja.style.position = "fixed";
+    caja.innerHTML = `<form style="max-width:360px;width:100%"><h1 style="font-size:20px">Versión completa · acceso de socios</h1>
+      <p style="color:var(--suave)">Lleva datos de contacto. Uso interno de Data Goal: no reenvíes la contraseña.</p>
+      <input type="password" autocomplete="current-password" placeholder="Contraseña" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--linea);background:var(--fondo);color:var(--texto)">
+      <button style="margin-top:10px;padding:9px 16px;border-radius:99px;border:1px solid var(--radar);background:transparent;color:var(--radar);cursor:pointer">Entrar</button>
+      <p class="err" style="color:var(--alerta);min-height:1.4em"></p></form>`;
+    document.body.appendChild(caja);
+    const form = caja.querySelector("form"), inp = caja.querySelector("input"), err = caja.querySelector(".err");
+    const prueba = async pw => {
+      try { CLAVE = await derivaClave(pw); if (await descifra(CIFRADO.prueba) !== "radar-ok") throw 0; }
+      catch (e) { CLAVE = null; return false; }
+      try { sessionStorage.setItem("radar-clave", pw); } catch (e) {}
+      caja.remove(); ok(); return true;
+    };
+    form.onsubmit = async e => { e.preventDefault(); err.textContent = "Comprobando…";
+      if (!(await prueba(inp.value))) err.textContent = "Contraseña incorrecta."; };
+    let guardada = null; try { guardada = sessionStorage.getItem("radar-clave"); } catch (e) {}
+    if (guardada) prueba(guardada); else inp.focus();
+  });
+}
 function cargaScript(src){
+  if (CIFRADO) return fetch(src.replace(/\.js$/, ".cif"), {cache: "no-cache"}).then(r => {
+      if (!r.ok) throw new Error("No se pudo cargar " + src); return r.text(); })
+    .then(descifra).then(js => new Promise((ok, mal) => {
+      const s = document.createElement("script"), url = URL.createObjectURL(new Blob([js], {type: "text/javascript"}));
+      s.src = url; s.onload = () => { s.remove(); URL.revokeObjectURL(url); ok(); };
+      s.onerror = () => { s.remove(); mal(new Error("No se pudo cargar " + src)); };
+      document.head.appendChild(s);
+    }));
   return new Promise((ok, mal) => {
     const s = document.createElement("script");
     s.src = src; s.onload = () => { s.remove(); ok(); };
@@ -635,7 +680,7 @@ function detalle(f, i){
   return h;
 }
 
-arranca();
+CIFRADO ? pideClave().then(arranca) : arranca();
 </script>
 </body>
 </html>
